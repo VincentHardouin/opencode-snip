@@ -35,7 +35,7 @@ Add the plugin to your OpenCode config (`~/.config/opencode/opencode.json`):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-snip"]
+  "plugin": ["opencode-snip@latest"]
 }
 ```
 
