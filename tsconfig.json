@@ -14,6 +14,6 @@
     "rootDir": "./src",
     "lib": ["ES2022"]
   },
-  "include": ["src/**/*", ".opencode/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
