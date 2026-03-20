@@ -1,6 +1,9 @@
 import type { Hooks, Plugin } from "@opencode-ai/plugin"
 
 const ENV_VAR_RE = /^([A-Za-z_][A-Za-z0-9_]*=[^\s]* +)*/
+const UNPROXYABLE_COMMANDS = new Set([
+  "cd", "source", ".", "export", "alias", "unset", "set", "shopt", "eval", "exec",
+])
 
 export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = async (input, output) => {
   if (input.tool !== "bash") return
@@ -17,6 +20,8 @@ export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = asyn
   // Extract leading env var prefix (e.g. "CGO_ENABLED=0 GOOS=linux ")
   const envPrefix = (firstPart.match(ENV_VAR_RE) ?? [""])[0]
   const bareCmd = firstPart.slice(envPrefix.length).trim()
+
+  if (UNPROXYABLE_COMMANDS.has(bareCmd.split(/\s+/)[0])) return
 
   output.args.command = `${envPrefix}snip ${bareCmd}${rest}`
 }
