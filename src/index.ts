@@ -33,7 +33,14 @@ export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = asyn
     .join("")
 }
 
-export const SnipPlugin: Plugin = async () => {
+export const SnipPlugin: Plugin = async ({ $ }) => {
+  try {
+    await $`which snip`.quiet()
+  } catch {
+    console.warn("[snip] snip binary not found in PATH — plugin disabled")
+    return {}
+  }
+
   return {
     "tool.execute.before": toolExecuteBefore,
   }
