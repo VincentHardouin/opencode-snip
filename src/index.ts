@@ -38,41 +38,45 @@ async function snipCommand(command: string, shouldWrap: (cmd: string) => Promise
 
 export function createToolExecuteBefore(shouldWrap: (cmd: string) => Promise<boolean>) {
   return async (input: Parameters<NonNullable<Hooks["tool.execute.before"]>>[0], output: Parameters<NonNullable<Hooks["tool.execute.before"]>>[1]) => {
-    if (input.tool !== "bash") return
+    try {
+      if (input.tool !== "bash") return
 
-    const command = output.args.command
-    if (!command || typeof command !== "string") return
-    if (command.startsWith("snip ")) return
+      const command = output.args.command
+      if (!command || typeof command !== "string") return
+      if (command.startsWith("snip ")) return
 
-    const pipeIdx = findFirstPipe(command)
-    if (pipeIdx !== -1) {
-      const firstCmd = command.slice(0, pipeIdx).trimEnd()
-      const rest = command.slice(pipeIdx)
-      output.args.command = (await snipCommand(firstCmd, shouldWrap)) + ' ' + rest
-      return
-    }
+      const pipeIdx = findFirstPipe(command)
+      if (pipeIdx !== -1) {
+        const firstCmd = command.slice(0, pipeIdx).trimEnd()
+        const rest = command.slice(pipeIdx)
+        output.args.command = (await snipCommand(firstCmd, shouldWrap)) + ' ' + rest
+        return
+      }
 
-    const segments = command.split(OPERATOR_RE)
+      const segments = command.split(OPERATOR_RE)
 
-    if (segments.length === 1) {
-      output.args.command = await snipCommand(command, shouldWrap)
-      return
-    }
+      if (segments.length === 1) {
+        output.args.command = await snipCommand(command, shouldWrap)
+        return
+      }
 
-    const processed = await Promise.all(
-      segments.map((segment) =>
-        OPERATOR_RE.test(segment) ? Promise.resolve(segment) : snipCommand(segment, shouldWrap)
+      const processed = await Promise.all(
+        segments.map((segment) =>
+          OPERATOR_RE.test(segment) ? Promise.resolve(segment) : snipCommand(segment, shouldWrap)
+        )
       )
-    )
-    output.args.command = processed.join("")
+      output.args.command = processed.join("")
+    } catch {
+      // leave command unmodified on any unexpected error
+    }
   }
 }
 
-export const SnipPlugin: Plugin = async ({ $ }) => {
+export const SnipPlugin: Plugin = async ({ $, client }) => {
   try {
     await $`which snip`.quiet()
   } catch {
-    console.warn("[snip] snip binary not found in PATH — plugin disabled")
+    await client.log({ level: "warn", message: "[snip] snip binary not found in PATH — plugin disabled" }).catch(() => {})
     return {}
   }
 
@@ -81,7 +85,7 @@ export const SnipPlugin: Plugin = async ({ $ }) => {
       const result = await $`snip check -- ${{raw: cmd}}`.nothrow().quiet()
       return result.exitCode === 0
     } catch (err) {
-      console.warn("[snip] snip check failed for %o: %o", cmd, err)
+      await client.log({ level: "warn", message: `[snip] snip check failed for ${cmd}`, extra: { error: String(err) } }).catch(() => {})
       return false
     }
   }

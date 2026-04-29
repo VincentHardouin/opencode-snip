@@ -247,6 +247,22 @@ describe("toolExecuteBefore", () => {
     })
   })
 
+  describe("error guard", () => {
+    it("should leave command unmodified when shouldWrap throws", async () => {
+      const throwWrap = async () => { throw new Error("boom") }
+      mockOutput.args.command = "go test ./..."
+      await createToolExecuteBefore(throwWrap)(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("go test ./...")
+    })
+
+    it("should leave command unmodified when shouldWrap throws for compound commands", async () => {
+      const throwWrap = async () => { throw new Error("boom") }
+      mockOutput.args.command = "go test && go build"
+      await createToolExecuteBefore(throwWrap)(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("go test && go build")
+    })
+  })
+
   describe("mixed wrapping in compound commands", () => {
     it("should wrap only segments that shouldWrap approves", async () => {
       const selectiveWrap = async (cmd: string) => !cmd.startsWith("cd ")
