@@ -159,6 +159,68 @@ describe("toolExecuteBefore", () => {
     })
   })
 
+  describe("deduplication of LLM-generated snip prefixes", () => {
+    it("should deduplicate multiple snip prefixes on a simple command", async () => {
+      mockOutput.args.command = "snip snip snip go test"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test")
+    })
+
+    it("should preserve single snip prefix", async () => {
+      mockOutput.args.command = "snip go test"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test")
+    })
+
+    it("should deduplicate snip prefixes on both sides of &&", async () => {
+      mockOutput.args.command = "snip go test && snip go build"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test && snip go build")
+    })
+
+    it("should deduplicate varying levels of duplication across segments", async () => {
+      mockOutput.args.command = "snip snip go test && snip snip snip echo hello"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test && snip echo hello")
+    })
+
+    it("should deduplicate the extreme duplication case from LLM hallucination", async () => {
+      mockOutput.args.command = "snip snip snip snip snip somecommand && snip snip snip snip snip anothercommand"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip somecommand && snip anothercommand")
+    })
+
+    it("should deduplicate with env var prefix", async () => {
+      mockOutput.args.command = "FOO=bar snip snip go test"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("FOO=bar snip go test")
+    })
+
+    it("should deduplicate with pipe expression", async () => {
+      mockOutput.args.command = "snip snip go test | head"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test | head")
+    })
+
+    it("should deduplicate with semicolon operator", async () => {
+      mockOutput.args.command = "snip snip go test; snip snip snip go build"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip go test; snip go build")
+    })
+
+    it("should deduplicate with || operator", async () => {
+      mockOutput.args.command = "snip snip test -f foo || snip echo missing"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip test -f foo || snip echo missing")
+    })
+
+    it("should deduplicate only the first segment when pipe is present", async () => {
+      mockOutput.args.command = "snip snip git log | head"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip git log | head")
+    })
+  })
+
   describe("pipe expressions with quotes", () => {
     it("should not split pipes inside single quotes", async () => {
       mockOutput.args.command = "cat file.json | jq '.content | .text'"

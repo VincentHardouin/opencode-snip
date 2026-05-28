@@ -29,9 +29,17 @@ function findFirstPipe(command: string): number {
   return -1
 }
 
+function stripSnipPrefixes(cmd: string): string {
+  let s = cmd.trimStart()
+  while (s.startsWith("snip ")) {
+    s = s.slice(5).trimStart()
+  }
+  return s
+}
+
 function snipCommand(command: string): string {
   const envPrefix = (command.match(ENV_VAR_RE) ?? [""])[0]
-  const bareCmd = command.slice(envPrefix.length).trim()
+  const bareCmd = stripSnipPrefixes(command.slice(envPrefix.length).trim())
   if (!bareCmd) return command
   if (UNPROXYABLE_COMMANDS.has(bareCmd.split(/\s+/)[0])) return command
   return `${envPrefix}snip ${bareCmd}`
@@ -42,7 +50,6 @@ export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = asyn
 
   const command = output.args.command
   if (!command || typeof command !== "string") return
-  if (command.startsWith("snip ")) return
 
   if (findFirstPipe(command) !== -1) {
     const pipeIdx = findFirstPipe(command)
