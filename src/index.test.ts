@@ -196,4 +196,136 @@ describe("toolExecuteBefore", () => {
       expect(mockOutput.args.command).toBe('snip echo "hello | world" | cat')
     })
   })
+
+  describe("PowerShell support", () => {
+    it("should skip PowerShell env var assignment", async () => {
+      mockOutput.args.command = "$env:CI='true'"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("$env:CI='true'")
+    })
+
+    it("should skip PowerShell variable assignment", async () => {
+      mockOutput.args.command = "$x = 1"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("$x = 1")
+    })
+
+    it("should skip Write-Output cmdlet", async () => {
+      mockOutput.args.command = "Write-Output 'hello'"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("Write-Output 'hello'")
+    })
+
+    it("should skip Get-ChildItem cmdlet", async () => {
+      mockOutput.args.command = "Get-ChildItem ."
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("Get-ChildItem .")
+    })
+
+    it("should skip Remove-Item cmdlet", async () => {
+      mockOutput.args.command = "Remove-Item -Recurse -Force dir"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("Remove-Item -Recurse -Force dir")
+    })
+
+    it("should skip ForEach-Object cmdlet (camelCase verb)", async () => {
+      mockOutput.args.command = "ForEach-Object { $_.Name }"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("ForEach-Object { $_.Name }")
+    })
+
+    it("should skip ConvertTo-Json cmdlet (camelCase verb)", async () => {
+      mockOutput.args.command = "ConvertTo-Json -Depth 5"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("ConvertTo-Json -Depth 5")
+    })
+
+    it("should skip PowerShell call operator (&)", async () => {
+      mockOutput.args.command = "& 'C:\\Program Files\\tool.exe'"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("& 'C:\\Program Files\\tool.exe'")
+    })
+
+    it("should skip PowerShell splatting (@args)", async () => {
+      mockOutput.args.command = "@args"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("@args")
+    })
+
+    it("should skip PowerShell array literal (@())", async () => {
+      mockOutput.args.command = '@("a","b")'
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe('@("a","b")')
+    })
+
+    it("should skip env var but snip chained command", async () => {
+      mockOutput.args.command = "$env:CI='true'; git log -1"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("$env:CI='true'; snip git log -1")
+    })
+
+    it("should skip cmdlet but snip chained command", async () => {
+      mockOutput.args.command = "Write-Output 'test'; git log -1"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("Write-Output 'test'; snip git log -1")
+    })
+
+    it("should handle mixed PowerShell env vars and commands", async () => {
+      mockOutput.args.command = "$env:CI='true'; $env:GIT_PAGER='cat'; cd 'C:\\Projects'; git log -1"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("$env:CI='true'; $env:GIT_PAGER='cat'; cd 'C:\\Projects'; snip git log -1")
+    })
+  })
+
+  describe("newline splitting", () => {
+    it("should split and snip commands separated by newlines", async () => {
+      mockOutput.args.command = "git log\ngit status"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip git log\nsnip git status")
+    })
+
+    it("should handle newline after unproxyable command", async () => {
+      mockOutput.args.command = "cd /tmp\ngit log"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("cd /tmp\nsnip git log")
+    })
+
+    it("should handle mixed newlines and operators", async () => {
+      mockOutput.args.command = "cd /tmp\ngit log && git status"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("cd /tmp\nsnip git log && snip git status")
+    })
+
+    it("should handle pipe within newline-separated commands", async () => {
+      mockOutput.args.command = "cd /tmp\ngit log | head"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("cd /tmp\nsnip git log | head")
+    })
+
+    it("should handle PowerShell prelude with newlines", async () => {
+      mockOutput.args.command = "$env:CI='true'; cd 'C:\\Projects'\ngit show abc123"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("$env:CI='true'; cd 'C:\\Projects'\nsnip git show abc123")
+    })
+  })
+
+  describe("heredoc safety", () => {
+    it("should not split heredoc body on newlines", async () => {
+      mockOutput.args.command = "cat <<EOF\nhello world\nEOF"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip cat <<EOF\nhello world\nEOF")
+    })
+
+    it("should not split heredoc with quoted delimiter", async () => {
+      mockOutput.args.command = "cat <<'EOF'\nhello world\nEOF"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip cat <<'EOF'\nhello world\nEOF")
+    })
+
+    it("should still split operators when heredoc is present", async () => {
+      mockOutput.args.command = "cat <<EOF\ndata\nEOF && echo done"
+      await toolExecuteBefore(mockInput, mockOutput)
+      expect(mockOutput.args.command).toBe("snip cat <<EOF\ndata\nEOF && snip echo done")
+    })
+  })
 })

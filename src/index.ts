@@ -4,7 +4,24 @@ const ENV_VAR_RE = /^([A-Za-z_][A-Za-z0-9_]*=[^\s]* +)*/
 const UNPROXYABLE_COMMANDS = new Set([
   "cd", "source", ".", "export", "alias", "unset", "set", "shopt", "eval", "exec",
 ])
-const OPERATOR_RE = /(\s*(?:&&|\|\||;)\s*|\s&\s?)/
+const OPERATOR_RE = /(\s*(?:&&|\|\||;)\s*|\s&\s?|\r?\n)/
+// Same as OPERATOR_RE but without newline splitting. Used when the command
+// contains a heredoc (<<DELIM) whose multi-line body must not be split.
+const OPERATOR_ONLY_RE = /(\s*(?:&&|\|\||;)\s*|\s&\s?)/
+
+// Heredoc marker: <<DELIM, <<-DELIM, <<'DELIM', <<"DELIM"
+const HEREDOC_RE = /<<-?\s*['"]?\w/
+
+// PowerShell: segments starting with these chars are never external commands.
+// $  → variable/assignment ($env:CI='true', $x = 1)
+// @  → here-string, splat, array (@", @(), @{})
+// &  → call operator (& "path\to\exe")
+// {  → script block
+const POWERSHELL_SKIP_RE = /^[$@&{]/
+
+// PowerShell Verb-Noun cmdlets (e.g. Write-Output, Get-ChildItem, Set-Location).
+// These are shell builtins and cannot be exec'd by snip.
+const POWERSHELL_CMDLET_RE = /^[A-Z][a-zA-Z]*-[A-Z]/
 
 function findFirstPipe(command: string): number {
   let inSingleQuote = false
@@ -33,8 +50,21 @@ function snipCommand(command: string): string {
   const envPrefix = (command.match(ENV_VAR_RE) ?? [""])[0]
   const bareCmd = command.slice(envPrefix.length).trim()
   if (!bareCmd) return command
-  if (UNPROXYABLE_COMMANDS.has(bareCmd.split(/\s+/)[0])) return command
+  const firstWord = bareCmd.split(/\s+/)[0]
+  if (UNPROXYABLE_COMMANDS.has(firstWord)) return command
+  if (POWERSHELL_SKIP_RE.test(bareCmd)) return command
+  if (POWERSHELL_CMDLET_RE.test(firstWord)) return command
   return `${envPrefix}snip ${bareCmd}`
+}
+
+function snipSegment(segment: string): string {
+  const pipeIdx = findFirstPipe(segment)
+  if (pipeIdx !== -1) {
+    const firstCmd = segment.slice(0, pipeIdx).trimEnd()
+    const rest = segment.slice(pipeIdx)
+    return snipCommand(firstCmd) + ' ' + rest
+  }
+  return snipCommand(segment)
 }
 
 export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = async (input, output) => {
@@ -44,23 +74,16 @@ export const toolExecuteBefore: NonNullable<Hooks["tool.execute.before"]> = asyn
   if (!command || typeof command !== "string") return
   if (command.startsWith("snip ")) return
 
-  if (findFirstPipe(command) !== -1) {
-    const pipeIdx = findFirstPipe(command)
-    const firstCmd = command.slice(0, pipeIdx).trimEnd()
-    const rest = command.slice(pipeIdx)
-    output.args.command = snipCommand(firstCmd) + ' ' + rest
-    return
-  }
-
-  const segments = command.split(OPERATOR_RE)
+  const separator = HEREDOC_RE.test(command) ? OPERATOR_ONLY_RE : OPERATOR_RE
+  const segments = command.split(separator)
 
   if (segments.length === 1) {
-    output.args.command = snipCommand(command)
+    output.args.command = snipSegment(command)
     return
   }
 
   output.args.command = segments
-    .map((segment) => OPERATOR_RE.test(segment) ? segment : snipCommand(segment))
+    .map((segment) => separator.test(segment) ? segment : snipSegment(segment))
     .join("")
 }
 
