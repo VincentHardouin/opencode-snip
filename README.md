@@ -2,6 +2,25 @@
 
 OpenCode plugin that automatically prefixes shell commands with [snip](https://github.com/edouard-claude/snip) to reduce LLM token consumption by 60-90%.
 
+## OpenCode V2 port
+
+This fork ports the plugin to the **OpenCode V2 plugin API** — OpenCode V2 rejects V1 hook objects (*"Plugin must export a default definition with an id and a setup function"*), so the V1 `tool.execute.before` (bash) hook is registered as its V2 equivalents instead:
+
+- `ctx.tool.hook("execute.before")` — the only registered hook: rewrites `shell`/`bash` commands before execution (the V2 `ctx.shell.hook("create.before")` hook is not invoked for shell tool executions in OpenCode 2.0.x, so it is not used)
+
+Also supports a `snip.exe` shipped next to the plugin or at the package root (no PATH dependency). The PowerShell `&` prefix is decided from the OpenCode `shell` setting (project config first, then global), falling back to PowerShell on Windows. Every hook is fail-open: on any failure the command runs unchanged.
+
+Install (OpenCode V2):
+
+```jsonc
+// ~/.config/opencode/opencode.json
+{
+  "plugins": ["opencode-snip@git+https://github.com/cpvcristian1/opencode-snip.git"]
+}
+```
+
+Port of [VincentHardouin/opencode-snip](https://github.com/VincentHardouin/opencode-snip) (MIT).
+
 ## What is snip?
 
 [snip](https://github.com/edouard-claude/snip) is a CLI proxy that filters shell output before it reaches your LLM context window.
