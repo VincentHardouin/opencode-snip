@@ -7,7 +7,11 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v6
@@ -24,11 +28,29 @@ jobs:
         run: npm run typecheck
 
       - name: Install snip
+        if: runner.os == 'Linux'
         env:
           SNIP_VERSION: 0.25.2
+        shell: bash
         run: |
           curl -fsSL "https://github.com/edouard-claude/snip/releases/download/v${SNIP_VERSION}/snip_${SNIP_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin snip
           snip --version
+
+      - name: Install snip (Windows)
+        if: runner.os == 'Windows'
+        env:
+          SNIP_VERSION: 0.25.2
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'snip tools'
+          $archive = Join-Path $env:RUNNER_TEMP "snip_$($env:SNIP_VERSION)_windows_amd64.zip"
+          New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/edouard-claude/snip/releases/download/v$($env:SNIP_VERSION)/snip_$($env:SNIP_VERSION)_windows_amd64.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $installDir -Force
+          $snip = Join-Path $installDir 'snip.exe'
+          if (-not (Test-Path $snip)) { throw "snip.exe not found at archive root" }
+          Add-Content -Path $env:GITHUB_PATH -Value $installDir
+          & $snip --version
 
       - name: Test
         run: npm test
