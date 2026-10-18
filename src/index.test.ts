@@ -7,23 +7,14 @@ const hasSnipHook = (await rewrite("git status")) !== undefined
 const SNIP_RUN = /^"[^"]*snip(\.exe)?" run -- /
 
 describe("toolExecuteBefore", () => {
-  let mockInput: { tool: string; sessionID: string; callID: string }
-  let mockOutput: { args: { command: string } }
-
-  beforeEach(() => {
-    mockInput = { tool: "bash", sessionID: "s", callID: "c" }
-    mockOutput = { args: { command: "" } }
-  })
-
-  async function run(command: string) {
-    mockOutput.args.command = command
-    await toolExecuteBefore(mockInput, mockOutput)
-    return mockOutput.args.command
+  async function run(command: string, tool = "shell") {
+    const event: { tool: string; input: unknown } = { tool, input: { command } }
+    await toolExecuteBefore(event)
+    return (event.input as { command: string }).command
   }
 
-  it("should not modify non-bash tool calls", async () => {
-    mockInput.tool = "read"
-    expect(await run("git status")).toBe("git status")
+  it("should not modify non-shell tool calls", async () => {
+    expect(await run("git status", "read")).toBe("git status")
   })
 
   describe.skipIf(!hasSnipHook)("with snip", () => {
@@ -76,7 +67,9 @@ describe("toolExecuteBefore", () => {
     })
 
     it("should disable the plugin", async () => {
-      expect(await SnipPlugin({} as Parameters<typeof SnipPlugin>[0])).toEqual({})
+      const hook = vi.fn()
+      await SnipPlugin.setup({ tool: { hook } } as unknown as Parameters<typeof SnipPlugin.setup>[0])
+      expect(hook).not.toHaveBeenCalled()
     })
   })
 })

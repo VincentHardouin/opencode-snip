@@ -1,15 +1,16 @@
 name: CD
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches: [main, next]
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: ci
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: write
       id-token: write

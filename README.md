@@ -29,13 +29,15 @@ Add the plugin to your OpenCode config (`~/.config/opencode/opencode.json`):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-snip@latest"]
+  "plugins": ["opencode-snip@latest"]
 }
 ```
 
+The plugin targets OpenCode v2. On OpenCode v1, use `opencode-snip@2`.
+
 ## How It Works
 
-The plugin uses the `tool.execute.before` hook to forward each bash command to `snip hook`, the same rewrite engine snip uses for Claude Code and other agents (tested with snip v0.25.2):
+The plugin uses the tool `execute.before` hook to forward each `shell` command to `snip hook`, the same rewrite engine snip uses for Claude Code and other agents (tested with snip v0.25.2):
 
 - only commands snip has a filter for are rewritten to `snip run -- <command>`, each segment of `&&`, `||`, `;` chains separately
 - commands whose output feeds a pipe or a file redirection, heredocs, shell blocks and command substitutions are left untouched
