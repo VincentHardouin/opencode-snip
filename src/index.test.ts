@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { SnipPlugin, rewrite, toolExecuteBefore } from "./index"
+import { SnipPlugin, forPowerShell, rewrite, toolExecuteBefore } from "./index"
 
 // Same probe as the plugin startup: an old snip without `hook` skips these tests.
 const hasSnipHook = (await rewrite("git status")) !== undefined
 
-const SNIP_RUN = /^"[^"]*snip(\.exe)?" run -- /
+// On Windows the plugin starts each invocation with PowerShell's call operator.
+const CALL = process.platform === "win32" ? "& " : ""
+
+const SNIP_RUN = new RegExp(`^${CALL}"[^"]*snip(\\.exe)?" run -- `)
 
 describe("toolExecuteBefore", () => {
   async function run(command: string, tool = "shell") {
@@ -29,7 +32,12 @@ describe("toolExecuteBefore", () => {
     })
 
     it("should wrap each segment of a compound command", async () => {
-      expect(await run("git status && git log -5")).toMatch(/ run -- git status && "[^"]*" run -- git log -5$/)
+      const command = await run("git status && git log -5")
+      const segments = command.split(" && ")
+      expect(segments).toHaveLength(2)
+      expect(segments[0]).toMatch(SNIP_RUN)
+      expect(segments[1]).toMatch(SNIP_RUN)
+      expect(command).toMatch(/ run -- git log -5$/)
     })
 
     it("should not double wrap an already wrapped command", async () => {
@@ -71,5 +79,38 @@ describe("toolExecuteBefore", () => {
       await SnipPlugin.setup({ tool: { hook } } as unknown as Parameters<typeof SnipPlugin.setup>[0])
       expect(hook).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("forPowerShell", () => {
+  // The shape snip emits on Windows: an absolute, quoted executable path.
+  const SNIP = '"C:\\Users\\me\\scoop\\shims\\snip.exe"'
+
+  it("should prefix a wrapped command with the call operator", () => {
+    expect(forPowerShell(`${SNIP} run -- git status`)).toBe(`& ${SNIP} run -- git status`)
+  })
+
+  it("should prefix every segment of a compound command", () => {
+    expect(forPowerShell(`${SNIP} run -- git status ; ${SNIP} run -- git log -5`)).toBe(
+      `& ${SNIP} run -- git status ; & ${SNIP} run -- git log -5`,
+    )
+  })
+
+  it("should handle && and || separators", () => {
+    expect(forPowerShell(`${SNIP} run -- git status && ${SNIP} run -- git log`)).toBe(
+      `& ${SNIP} run -- git status && & ${SNIP} run -- git log`,
+    )
+    expect(forPowerShell(`${SNIP} run -- git status || ${SNIP} run -- git log`)).toBe(
+      `& ${SNIP} run -- git status || & ${SNIP} run -- git log`,
+    )
+  })
+
+  it("should leave an already prefixed command untouched", () => {
+    const command = `& ${SNIP} run -- git status`
+    expect(forPowerShell(command)).toBe(command)
+  })
+
+  it("should leave commands snip did not wrap untouched", () => {
+    expect(forPowerShell("git status")).toBe("git status")
   })
 })

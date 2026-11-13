@@ -20,6 +20,18 @@ export function rewrite(command: string): Promise<string | undefined> {
   })
 }
 
+// OpenCode's shell tool runs PowerShell on Windows, where a quoted executable
+// path is a parse error unless it is preceded by the call operator:
+//   "C:\...\snip.exe" run -- git status      -> ParserError
+//   & "C:\...\snip.exe" run -- git status    -> works
+// Compound commands are wrapped segment by segment, so every segment needs the
+// operator, and an already prefixed command must be left alone.
+const SNIP_INVOCATION = /(^|&&\s*|\|\|\s*|;\s*)(?="[^"]*snip(?:\.exe)?" run\b)/g
+
+export function forPowerShell(command: string): string {
+  return command.replace(SNIP_INVOCATION, "$1& ")
+}
+
 export const toolExecuteBefore = async (event: { tool: string; input: unknown }) => {
   if (event.tool !== "shell") return
 
@@ -28,7 +40,8 @@ export const toolExecuteBefore = async (event: { tool: string; input: unknown })
   if (!command || typeof command !== "string") return
 
   const rewritten = await rewrite(command)
-  if (rewritten) event.input = { ...input, command: rewritten }
+  if (!rewritten) return
+  event.input = { ...input, command: process.platform === "win32" ? forPowerShell(rewritten) : rewritten }
 }
 
 export const SnipPlugin = Plugin.define({

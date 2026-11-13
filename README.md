@@ -42,6 +42,7 @@ The plugin uses the tool `execute.before` hook to forward each `shell` command t
 - only commands snip has a filter for are rewritten to `snip run -- <command>`, each segment of `&&`, `||`, `;` chains separately
 - commands whose output feeds a pipe or a file redirection, heredocs, shell blocks and command substitutions are left untouched
 - if `snip hook` fails, the command runs unchanged
+- on Windows each wrapped command is additionally prefixed with PowerShell's call operator (`& "C:\…\snip.exe" run -- …`): OpenCode's shell tool runs PowerShell there, where a bare quoted executable path is a parse error
 
 ## Development
 
