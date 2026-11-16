@@ -47,6 +47,25 @@ export const toolExecuteBefore = async (event: { tool: string; input: unknown })
   if (rewritten) event.input = { ...input, command: rewritten }
 }
 
+// `snip hook` emits `[runner|env ...] "<snip>"[ --plugin-config ...] run -- <command>`.
+// Keep the runner prefix, strip env assignments, and unwrap one snip layer so
+// rules and saved approvals match the command the shell scanner checks.
+const SNIP_RUN = /^(.*?)(?:"(?:[^"\\]|\\.)*[\\/]snip(?:\.exe)?"|"snip(?:\.exe)?"|(?:[^\s"']*[\\/])?snip(?:\.exe)?)(?:\s+--plugin-config\s+(?:"(?:[^"\\]|\\.)*"|\S+))?\s+(?:run\s+)?--\s+([\s\S]+)$/
+const ENV_PREFIX = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)\s+)*/
+
+function unwrapSnip(resource: string): string | undefined {
+  const match = SNIP_RUN.exec(resource)
+  return match ? `${match[1].replace(ENV_PREFIX, "")}${match[2]}` : undefined
+}
+
+type Assert = (input: {
+  sessionID: string
+  action: string
+  resources: string[]
+  save: string[]
+  source?: { type: "tool"; messageID: string; id: string }
+}) => Promise<void>
+
 export const SnipPlugin = Plugin.define({
   id: "opencode-snip",
   async setup(ctx) {
@@ -56,8 +75,35 @@ export const SnipPlugin = Plugin.define({
       console.warn("[snip] snip hook unavailable (binary missing or too old) — plugin disabled")
       return
     }
-    const registration = await ctx.tool.hook("execute.before", toolExecuteBefore)
-    return () => registration.dispose()
+    const assert = (ctx.permission as typeof ctx.permission & { assert: Assert }).assert
+    const tools = await ctx.tool.hook("execute.before", toolExecuteBefore)
+    // Permissions are checked after `execute.before` rewrites the command, so
+    // rules would match the snip wrapper. Re-check the unwrapped command and
+    // settle the original decision, keeping rules and saved approvals intact.
+    const permissions = await ctx.permission.hook("evaluate", async (event) => {
+      if (event.action !== "shell") return
+      const unwrapped = event.resources.map(unwrapSnip)
+      if (unwrapped.every((command) => command === undefined)) return
+      // Mixed commands keep their unwrapped segments in the re-check.
+      const commands = unwrapped.map((command, index) => command ?? event.resources[index])
+      try {
+        await assert({
+          sessionID: event.sessionID,
+          action: event.action,
+          resources: commands,
+          save: commands.map((command) => `${command} *`),
+          ...(event.source ? { source: event.source } : {}),
+        })
+        event.effect = "allow"
+      } catch (error) {
+        event.effect = "deny"
+        event.message = error instanceof Error ? error.message : String(error)
+      }
+    })
+    return async () => {
+      await tools.dispose()
+      await permissions.dispose()
+    }
   },
 })
 
