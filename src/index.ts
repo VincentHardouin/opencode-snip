@@ -1,16 +1,32 @@
 import { execFile } from "node:child_process"
 import { Plugin } from "@opencode/plugin"
 
+// OpenCode's `cmd` shell escapes double quotes before handing a command to
+// cmd.exe, so a quoted launcher path arrives as \"C:\...\snip.exe\" and fails
+// with "is not recognized". Quoting is only needed when the path contains
+// whitespace or a cmd metacharacter, so drop it otherwise. Only cmd has this
+// problem, and only launchers at the start of a command segment are rewritten:
+// argument text must stay untouched.
+const QUOTED_LAUNCHER = /(^|&&|\|\||[|;])(\s*)"([^"\r\n]+)"(?=\s+run --\s)/g
+const NEEDS_QUOTES = /[\s&|<>^()%!]/
+
+export function unquoteLauncher(command: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return command
+  return command.replace(QUOTED_LAUNCHER, (match, separator: string, space: string, launcher: string) =>
+    NEEDS_QUOTES.test(launcher) ? match : `${separator}${space}${launcher}`,
+  )
+}
+
 // Delegates to `snip hook` (Claude Code PreToolUse format) so the rewrite rules
 // stay in snip: only filtered commands are wrapped, pipes/redirects/heredocs and
 // command substitutions are left raw. Any failure leaves the command untouched.
 export function rewrite(command: string): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const child = execFile("snip", ["hook"], { timeout: 2000 }, (error, stdout) => {
+    const child = execFile("snip", ["hook"], { timeout: 2000, windowsHide: true }, (error, stdout) => {
       if (error || !stdout.trim()) return resolve(undefined)
       try {
         const rewritten = JSON.parse(stdout).hookSpecificOutput?.updatedInput?.command
-        resolve(typeof rewritten === "string" ? rewritten : undefined)
+        resolve(typeof rewritten === "string" ? unquoteLauncher(rewritten) : undefined)
       } catch {
         resolve(undefined)
       }
