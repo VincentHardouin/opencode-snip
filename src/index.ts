@@ -4,14 +4,16 @@ import { Plugin } from "@opencode/plugin"
 // OpenCode's `cmd` shell escapes double quotes before handing a command to
 // cmd.exe, so a quoted launcher path arrives as \"C:\...\snip.exe\" and fails
 // with "is not recognized". Quoting is only needed when the path contains
-// whitespace, so drop the quotes when it does not. Paths with cmd
-// metacharacters keep their quotes: removing those would change meaning.
-const QUOTED_LAUNCHER = /"([^"\s]+)"(?=\s+run --\s)/g
-const CMD_METACHARACTERS = /[&|<>^()%!]/
+// whitespace or a cmd metacharacter, so drop it otherwise. Only cmd has this
+// problem, and only launchers at the start of a command segment are rewritten:
+// argument text must stay untouched.
+const QUOTED_LAUNCHER = /(^|&&|\|\||[|;])(\s*)"([^"\r\n]+)"(?=\s+run --\s)/g
+const NEEDS_QUOTES = /[\s&|<>^()%!]/
 
-export function unquoteLauncher(command: string): string {
-  return command.replace(QUOTED_LAUNCHER, (match, launcher: string) =>
-    CMD_METACHARACTERS.test(launcher) ? match : launcher,
+export function unquoteLauncher(command: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return command
+  return command.replace(QUOTED_LAUNCHER, (match, separator: string, space: string, launcher: string) =>
+    NEEDS_QUOTES.test(launcher) ? match : `${separator}${space}${launcher}`,
   )
 }
 

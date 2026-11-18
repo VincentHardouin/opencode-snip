@@ -4,9 +4,10 @@ import { SnipPlugin, rewrite, toolExecuteBefore, unquoteLauncher } from "./index
 // Same probe as the plugin startup: an old snip without `hook` skips these tests.
 const hasSnipHook = (await rewrite("git status")) !== undefined
 
-// The launcher is unquoted when its path has no whitespace because OpenCode's
-// `cmd` shell escapes double quotes on Windows.
-const SNIP_RUN = /^"?[^"\s]*snip(\.exe)?"? run -- /
+// snip quotes its launcher path; the plugin unquotes it on Windows when the
+// path needs no quotes. Accept either form so the suite passes everywhere.
+const SNIP_LAUNCHER = /(?:"[^"\r\n]*snip(?:\.exe)?"|[^\s"&|<>^()%!]*snip(?:\.exe)?)/
+const SNIP_RUN = new RegExp(`^${SNIP_LAUNCHER.source} run -- `)
 
 describe("toolExecuteBefore", () => {
   async function run(command: string, tool = "shell") {
@@ -27,11 +28,15 @@ describe("toolExecuteBefore", () => {
     })
 
     it("should keep env var prefixes before snip", async () => {
-      expect(await run("CGO_ENABLED=0 go test ./...")).toMatch(/^CGO_ENABLED=0 "?[^"\s]*"? run -- go test \.\/\.\.\.$/)
+      expect(await run("CGO_ENABLED=0 go test ./...")).toMatch(
+        new RegExp(`^CGO_ENABLED=0 ${SNIP_LAUNCHER.source} run -- go test \\.\\/\\.\\.\\.$`),
+      )
     })
 
     it("should wrap each segment of a compound command", async () => {
-      expect(await run("git status && git log -5")).toMatch(/ run -- git status && "?[^"\s]*"? run -- git log -5$/)
+      expect(await run("git status && git log -5")).toMatch(
+        new RegExp(` run -- git status && ${SNIP_LAUNCHER.source} run -- git log -5$`),
+      )
     })
 
     it("should not double wrap an already wrapped command", async () => {
@@ -77,27 +82,40 @@ describe("toolExecuteBefore", () => {
 })
 
 describe("unquoteLauncher", () => {
-  it("should unquote a launcher path without whitespace", () => {
-    expect(unquoteLauncher('"C:\\tools\\snip.exe" run -- git status')).toBe("C:\\tools\\snip.exe run -- git status")
+  it("should unquote a launcher path without whitespace on Windows", () => {
+    expect(unquoteLauncher('"C:\\tools\\snip.exe" run -- git status', "win32")).toBe(
+      "C:\\tools\\snip.exe run -- git status",
+    )
   })
 
   it("should keep the quotes when the path contains whitespace", () => {
     const command = '"C:\\Program Files\\snip.exe" run -- git status'
-    expect(unquoteLauncher(command)).toBe(command)
+    expect(unquoteLauncher(command, "win32")).toBe(command)
   })
 
   it("should keep the quotes when the path contains cmd metacharacters", () => {
     const command = '"C:\\tools&more\\snip.exe" run -- git status'
-    expect(unquoteLauncher(command)).toBe(command)
+    expect(unquoteLauncher(command, "win32")).toBe(command)
   })
 
   it("should unquote every segment of a compound command", () => {
-    expect(unquoteLauncher('"/usr/local/bin/snip" run -- git status && "/usr/local/bin/snip" run -- git log')).toBe(
+    const command = '"/usr/local/bin/snip" run -- git status && "/usr/local/bin/snip" run -- git log'
+    expect(unquoteLauncher(command, "win32")).toBe(
       "/usr/local/bin/snip run -- git status && /usr/local/bin/snip run -- git log",
     )
   })
 
+  it("should leave argument text untouched", () => {
+    const command = `git log --grep='"release" run -- tests'`
+    expect(unquoteLauncher(command, "win32")).toBe(command)
+  })
+
+  it("should not rewrite anything outside Windows", () => {
+    const command = '"/home/me/tools(1)/snip" run -- git status'
+    expect(unquoteLauncher(command, "linux")).toBe(command)
+  })
+
   it("should leave commands that are not snip wrappers untouched", () => {
-    expect(unquoteLauncher('echo "hello world"')).toBe('echo "hello world"')
+    expect(unquoteLauncher('echo "hello world"', "win32")).toBe('echo "hello world"')
   })
 })
