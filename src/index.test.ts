@@ -86,6 +86,11 @@ describe("unquoteLauncher", () => {
     expect(unquoteLauncher(command)).toBe(command)
   })
 
+  it("should keep the quotes when the path contains cmd metacharacters", () => {
+    const command = '"C:\\tools&more\\snip.exe" run -- git status'
+    expect(unquoteLauncher(command)).toBe(command)
+  })
+
   it("should unquote every segment of a compound command", () => {
     expect(unquoteLauncher('"/usr/local/bin/snip" run -- git status && "/usr/local/bin/snip" run -- git log')).toBe(
       "/usr/local/bin/snip run -- git status && /usr/local/bin/snip run -- git log",

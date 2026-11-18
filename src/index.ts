@@ -4,11 +4,15 @@ import { Plugin } from "@opencode/plugin"
 // OpenCode's `cmd` shell escapes double quotes before handing a command to
 // cmd.exe, so a quoted launcher path arrives as \"C:\...\snip.exe\" and fails
 // with "is not recognized". Quoting is only needed when the path contains
-// whitespace, so drop the quotes when it does not.
+// whitespace, so drop the quotes when it does not. Paths with cmd
+// metacharacters keep their quotes: removing those would change meaning.
 const QUOTED_LAUNCHER = /"([^"\s]+)"(?=\s+run --\s)/g
+const CMD_METACHARACTERS = /[&|<>^()%!]/
 
 export function unquoteLauncher(command: string): string {
-  return command.replace(QUOTED_LAUNCHER, "$1")
+  return command.replace(QUOTED_LAUNCHER, (match, launcher: string) =>
+    CMD_METACHARACTERS.test(launcher) ? match : launcher,
+  )
 }
 
 // Delegates to `snip hook` (Claude Code PreToolUse format) so the rewrite rules
