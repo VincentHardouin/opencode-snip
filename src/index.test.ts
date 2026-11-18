@@ -188,6 +188,18 @@ describe.skipIf(!hasSnipHook)("permission hook", () => {
     expect(context.permission.assert).toHaveBeenCalledWith(expect.objectContaining({ resources: [expected] }))
   })
 
+  it.each([
+    ["git clone --depth 1 https://example.com/repo.git", "git clone *"],
+    ["git status --short", "git status *"],
+    ["git config user.name", "git config user.name *"],
+    ["ls -la", "ls *"],
+    ["rg TODO src", "rg *"],
+  ])("saves the shell tool's prefix for %s", async (command, saved) => {
+    const { context, evaluate } = await setup()
+    await evaluate(evaluation({ resources: [`"/bin/snip" run -- ${command}`] }))
+    expect(context.permission.assert).toHaveBeenCalledWith(expect.objectContaining({ save: [saved] }))
+  })
+
   it("leaves commands the plugin did not wrap alone", async () => {
     const { context, evaluate } = await setup()
     const event = evaluation({ resources: ["echo hello", "git log | head"] })
@@ -206,7 +218,7 @@ describe.skipIf(!hasSnipHook)("permission hook", () => {
     expect(context.permission.assert).toHaveBeenCalledWith(
       expect.objectContaining({
         resources: ["git status", "echo hi"],
-        save: ["git status *", "echo hi *"],
+        save: ["git status *", "echo *"],
       }),
     )
     expect(event.effect).toBe("allow")
