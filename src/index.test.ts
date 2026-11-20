@@ -75,7 +75,10 @@ describe("toolExecuteBefore", () => {
 
     it("should disable the plugin", async () => {
       const hook = vi.fn()
-      await SnipPlugin.setup({ tool: { hook } } as unknown as Parameters<typeof SnipPlugin.setup>[0])
+      await SnipPlugin.setup({
+        tool: { hook },
+        permission: { hook: vi.fn(), assert: vi.fn() },
+      } as unknown as Parameters<typeof SnipPlugin.setup>[0])
       expect(hook).not.toHaveBeenCalled()
     })
   })
@@ -117,5 +120,123 @@ describe("unquoteLauncher", () => {
 
   it("should leave commands that are not snip wrappers untouched", () => {
     expect(unquoteLauncher('echo "hello world"', "win32")).toBe('echo "hello world"')
+  })
+})
+
+type Evaluate = (event: {
+  sessionID: string
+  action: string
+  resources: string[]
+  effect: "allow" | "ask" | "deny"
+  message?: string
+}) => Promise<void>
+
+describe.skipIf(!hasSnipHook)("permission hook", () => {
+  async function setup() {
+    let evaluate: Evaluate | undefined
+    const disposeTool = vi.fn()
+    const disposePermission = vi.fn()
+    const context = {
+      tool: { hook: vi.fn(async () => ({ dispose: disposeTool })) },
+      permission: {
+        assert: vi.fn(async () => {}),
+        hook: vi.fn(async (_name: string, callback: Evaluate) => {
+          evaluate = callback
+          return { dispose: disposePermission }
+        }),
+      },
+    }
+    const cleanup = await SnipPlugin.setup(context as unknown as Parameters<typeof SnipPlugin.setup>[0])
+    return { context, cleanup, evaluate: evaluate!, disposeTool, disposePermission }
+  }
+
+  const evaluation = (overrides: Partial<Parameters<Evaluate>[0]> = {}) => ({
+    sessionID: "ses_test",
+    action: "shell",
+    resources: ['"/bin/snip" run -- git status'],
+    effect: "allow" as const,
+    ...overrides,
+  })
+
+  it("re-checks the unwrapped command", async () => {
+    const { context, evaluate } = await setup()
+    const event = evaluation()
+    await evaluate(event)
+    expect(context.permission.assert).toHaveBeenCalledWith({
+      sessionID: "ses_test",
+      action: "shell",
+      resources: ["git status"],
+      save: ["git status *"],
+    })
+    expect(event.effect).toBe("allow")
+  })
+
+  it.each([
+    ['"/bin/snip" run -- git status', "git status"],
+    ['"/bin/snip" -- git status', "git status"],
+    ['CGO_ENABLED=0 "/bin/snip" run -- git status', "git status"],
+    ['FOO="a b" "/bin/snip" run -- git status', "git status"],
+    ['"/bin/snip" --plugin-config /tmp/snip.toml run -- git status', "git status"],
+    ['uv run "/bin/snip" run -- pytest', "uv run pytest"],
+    ['poetry run "/bin/snip" run -- git status', "poetry run git status"],
+    ['CGO_ENABLED=0 uv run "/bin/snip" run -- pytest', "uv run pytest"],
+    ['uv run --python 3.12 "/bin/snip" run -- pytest', "uv run --python 3.12 pytest"],
+    ['command "/bin/snip" run -- git status', "command git status"],
+  ])("unwraps %s", async (resource, expected) => {
+    const { context, evaluate } = await setup()
+    await evaluate(evaluation({ resources: [resource] }))
+    expect(context.permission.assert).toHaveBeenCalledWith(expect.objectContaining({ resources: [expected] }))
+  })
+
+  it.each([
+    ["git clone --depth 1 https://example.com/repo.git", "git clone *"],
+    ["git status --short", "git status *"],
+    ["git config user.name", "git config user.name *"],
+    ["ls -la", "ls *"],
+    ["rg TODO src", "rg *"],
+  ])("saves the shell tool's prefix for %s", async (command, saved) => {
+    const { context, evaluate } = await setup()
+    await evaluate(evaluation({ resources: [`"/bin/snip" run -- ${command}`] }))
+    expect(context.permission.assert).toHaveBeenCalledWith(expect.objectContaining({ save: [saved] }))
+  })
+
+  it("leaves commands the plugin did not wrap alone", async () => {
+    const { context, evaluate } = await setup()
+    const event = evaluation({ resources: ["echo hello", "git log | head"] })
+    await evaluate(event)
+    expect(context.permission.assert).not.toHaveBeenCalled()
+    expect(event.effect).toBe("allow")
+  })
+
+  it("re-checks wrapped and unwrapped segments of a mixed command", async () => {
+    const { context, evaluate } = await setup()
+    const event = evaluation({
+      resources: ['"/bin/snip" run -- git status', "echo hi"],
+      effect: "ask",
+    })
+    await evaluate(event)
+    expect(context.permission.assert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resources: ["git status", "echo hi"],
+        save: ["git status *", "echo *"],
+      }),
+    )
+    expect(event.effect).toBe("allow")
+  })
+
+  it("denies when the real command is denied", async () => {
+    const { context, evaluate } = await setup()
+    context.permission.assert.mockRejectedValue(new Error("Permission denied: shell"))
+    const event = evaluation()
+    await evaluate(event)
+    expect(event.effect).toBe("deny")
+    expect(event.message).toBe("Permission denied: shell")
+  })
+
+  it("disposes both hooks", async () => {
+    const { cleanup, disposeTool, disposePermission } = await setup()
+    await cleanup?.()
+    expect(disposeTool).toHaveBeenCalled()
+    expect(disposePermission).toHaveBeenCalled()
   })
 })
